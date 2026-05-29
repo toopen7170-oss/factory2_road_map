@@ -1,205 +1,140 @@
-import os
-import sys
-import traceback
 import sqlite3
-from datetime import datetime
+import os
 from kivy.app import App
-from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
-from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
-from kivy.uix.popup import Popup
+from kivy.uix.button import Button
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.gridlayout import GridLayout
 from kivy.core.text import LabelBase
 
-# ==========================================
-# [코어 설정] 실시간 블랙박스 및 이중 폰트 가로채기
-# ==========================================
-log_dir = '/storage/emulated/0/Download'
-log_file = os.path.join(log_dir, 'factory_blackbox.log')
-font_path = '/storage/emulated/0/Download/factory/factory_road_map/font.ttf'
-
-def write_blackbox(log_type, message):
-    """모든 시스템 이벤트를 실시간으로 저장공간/Download/factory_blackbox.log에 기록"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_entry = f"[{timestamp}] [{log_type}] {message}\n"
-    print(log_entry.strip())
-    try:
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(log_entry)
-    except Exception as e:
-        print(f"블랙박스 기록 실패: {str(e)}")
-
-# 앱 불시 튕김 현상 무조건 포착 감지기
-def blackbox_exception_handler(exctype, value, tb):
-    error_msg = f"치명적 오류 발생 (앱 튕김): {exctype.__name__}: {value}\n"
-    error_msg += "".join(traceback.format_exception(exctype, value, tb))
-    write_blackbox("CRASH_DUMP", error_msg)
-    sys.__excepthook__(exctype, value, tb)
-
-sys.excepthook = blackbox_exception_handler
-
-# 이중 폰트 가로채기 등록 (순정 기본 폰트명 자체를 우리 한글 폰트로 위장시킵니다)
-FONT_NAME = 'MyFont'
+# 상대 경로 기준 한글 폰트 등록
+font_path = 'font.ttf'
 if os.path.exists(font_path):
-    try:
-        # 1. 커스텀 이름 등록
-        LabelBase.register(name=FONT_NAME, fn_regular=font_path)
-        # 2. 순정 엔진 기본 이름(Roboto) 가로채기 등록 (힌트 텍스트 깨짐 물리적 방어)
-        LabelBase.register(name='Roboto', fn_regular=font_path)
-        write_blackbox("FONT_REG_SUCCESS", f"Kivy 핵심 엔진에 '{FONT_NAME}' 및 'Roboto' 이중 교차 가로채기 등록 성공.")
-    except Exception as e:
-        write_blackbox("FONT_REG_ERROR", f"폰트 등록 프로세스 예외 발생: {str(e)}")
-else:
-    write_blackbox("FONT_MISSING", f"지정된 경로에 폰트 파일이 없습니다: {font_path}")
+    LabelBase.register(name='NanumGothic', fn_regular=font_path)
 
-# 1. 로컬 데이터베이스 엔진 가동
-def init_db():
-    try:
-        conn = sqlite3.connect('factory2_road_map.db')
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                password TEXT,
-                point INTEGER DEFAULT 0,
-                unlocked_maps INTEGER DEFAULT 1,
-                vehicle_level INTEGER DEFAULT 0
-            )
-        ''')
-        conn.commit()
-        conn.close()
-        write_blackbox("DB_READY", "로컬 데이터베이스 테이블 무결성 검증 완료.")
-    except Exception as e:
-        write_blackbox("DB_CRITICAL", f"DB 가동 실패: {str(e)}")
-
-# 2. 로그인 시스템 화면
-class LoginScreen(Screen):
-    def __init__(self, **kwargs):
-        super(LoginScreen, self).__init__(**kwargs)
-        write_blackbox("UI_BUILD", "로그인 스크린 인터페이스 렌더링 개시")
-        
-        layout = BoxLayout(orientation='vertical', padding=50, spacing=20)
-        
-        # 타이틀
-        title = Label(text='factory2 road_map\n로그인 시스템', font_size=60, halign='center', font_name=FONT_NAME)
-        layout.add_widget(title)
-        
-        # 아이디 입력창 (오류를 유발하던 hint_text_font_name을 소각하고 무결한 font_name으로 단일 통제)
-        self.user_id = TextInput(
-            hint_text='아이디를 입력하세요', 
-            multiline=False, 
-            font_size=40, 
-            size_hint_y=0.4, 
-            font_name=FONT_NAME
-        )
-        layout.add_widget(self.user_id)
-        
-        # 비밀번호 입력창
-        self.password = TextInput(
-            hint_text='비밀번호를 입력하세요', 
-            password=True, 
-            multiline=False, 
-            font_size=40, 
-            size_hint_y=0.4, 
-            font_name=FONT_NAME
-        )
-        layout.add_widget(self.password)
-        
-        # 하단 버튼 레이아웃
-        btn_layout = BoxLayout(spacing=20, size_hint_y=0.5)
-        
-        btn_login = Button(text='로드 게임\n(로그인)', font_size=40, halign='center', font_name=FONT_NAME)
-        btn_login.bind(on_press=self.do_login)
-        btn_layout.add_widget(btn_login)
-        
-        btn_register = Button(text='새 게임\n(회원가입)', font_size=40, halign='center', font_name=FONT_NAME)
-        btn_register.bind(on_press=self.do_register)
-        btn_layout.add_widget(btn_register)
-        
-        layout.add_widget(btn_layout)
-        self.add_widget(layout)
-        write_blackbox("UI_READY", "로그인 화면 배치 및 이벤트 바인딩 100% 완료")
-
-    def show_popup(self, title, message):
-        write_blackbox("POPUP_LOG", f"팝업 트리거 -> [{title}] {message.replace('\n', ' ')}")
-        content = Label(text=message, font_size=30, halign='center', font_name=FONT_NAME)
-        popup = Popup(title=title, content=content, size_hint=(0.8, 0.4), title_font=FONT_NAME)
-        popup.open()
-
-    def do_register(self, instance):
-        uid = self.user_id.text.strip()
-        upw = self.password.text.strip()
-        write_blackbox("USER_ACTION", f"새 게임(회원가입) 터치 감지 - 입력 ID: '{uid}'")
-        
-        if not uid or not upw:
-            self.show_popup("경고", "아이디와 비밀번호를\n모두 입력해주세요.")
-            return
-            
-        try:
-            conn = sqlite3.connect('factory2_road_map.db')
-            c = conn.cursor()
-            c.execute("INSERT INTO users (id, password) VALUES (?, ?)", (uid, upw))
-            conn.commit()
-            write_blackbox("DB_INSERT", f"신규 회원 데이터 가입 성공 ID: {uid}")
-            self.show_popup("가입 완료", "새 게임 계정이 생성되었습니다!\n이제 로드 게임을 눌러주세요.")
-        except sqlite3.IntegrityError:
-            write_blackbox("DB_WARN", f"가입 실패: 이미 존재하는 중복 ID ({uid})")
-            self.show_popup("오류", "이미 존재하는 아이디입니다.\n다른 아이디를 입력하세요.")
-        except Exception as e:
-            write_blackbox("DB_ERROR", f"회원가입 처리 중 예외 발생: {str(e)}")
-        finally:
-            conn.close()
-
-    def do_login(self, instance):
-        uid = self.user_id.text.strip()
-        upw = self.password.text.strip()
-        write_blackbox("USER_ACTION", f"로드 게임(로그인) 터치 감지 - 입력 ID: '{uid}'")
-        
-        try:
-            conn = sqlite3.connect('factory2_road_map.db')
-            c = conn.cursor()
-            c.execute("SELECT * FROM users WHERE id=? AND password=?", (uid, upw))
-            user = c.fetchone()
-            conn.close()
-            
-            if user:
-                write_blackbox("AUTH_SUCCESS", f"로그인 인증 성공! 접속자 ID: {uid}")
-                self.show_popup("로그인 성공!", f"환영합니다, {uid} 마스터!\n누적 포인트: {user[2]} 점")
-                self.manager.current = 'game'
-            else:
-                write_blackbox("AUTH_FAIL", f"로그인 거부: 일치하는 계정 정보 없음 입력 ID: '{uid}'")
-                self.show_popup("오류", "아이디 또는 비밀번호가\n틀렸습니다.")
-        except Exception as e:
-            write_blackbox("AUTH_ERROR", f"로그인 연산 중 예외 발생: {str(e)}")
-
-# 3. 메인 게임 로비 화면
-class GameScreen(Screen):
-    def __init__(self, **kwargs):
-        super(GameScreen, self).__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=50)
-        
-        msg = Label(text='[가상 레이싱 로비 접속 완료]\n\n센서 동기화 대기 중...', font_size=50, halign='center', font_name=FONT_NAME)
-        layout.add_widget(msg)
-        
-        self.add_widget(layout)
-        write_blackbox("SCENE_CHANGE", "메인 게임 로비 화면 활성화 성공")
-
-# 4. 앱 메인 실행기
-class road_map_app(App):
+class FactoryRoadMapApp(App):
     def build(self):
-        write_blackbox("SYSTEM", "factory2 road_map 어플리케이션 초기화 엔진 가동")
-        init_db()
-        sm = ScreenManager()
-        sm.add_widget(LoginScreen(name='login'))
-        sm.add_widget(GameScreen(name='game'))
-        return sm
+        self.log_message("=== Factory 2.0 로드맵 엔진 가동 ===")
+        
+        # 1. 로컬 데이터베이스 자동 검증 및 테이블 초기화
+        db_status = self.init_database()
+        
+        # 메인 레이아웃 (세로 정렬)
+        main_layout = BoxLayout(orientation='vertical', padding=15, spacing=12)
+        
+        # 상단 헤더 및 로컬 DB 커넥션 상태 표시줄
+        header = BoxLayout(orientation='horizontal', size_hint_y=0.1)
+        title = Label(text="⚙️ Factory 2.0 마스터 로드맵", font_name='NanumGothic', font_size=20, bold=True)
+        status_color = (0, 1, 0, 1) if "성공" in db_status else (1, 0, 0, 1)
+        status_label = Label(text=f"DB: {db_status}", font_name='NanumGothic', font_size=14, color=status_color)
+        header.add_widget(title)
+        header.add_widget(status_label)
+        main_layout.add_widget(header)
+        
+        # 중단: 새로 설계된 5단계 공정 스크롤 영역
+        scroll = ScrollView(size_hint_y=0.7)
+        grid = GridLayout(cols=1, spacing=15, size_hint_y=None)
+        grid.bind(minimum_height=grid.setter('height'))
+        
+        # 데이터베이스로부터 실시간 공정 노드 호출
+        roadmap_data = self.fetch_roadmap_data()
+        for item in roadmap_data:
+            node_id, stage, title_text, manager, status = item
+            btn_text = f"[{stage}] {title_text}\n• 담당자: {manager}  |  • 상태: {status}"
+            
+            # 직관적인 대형 공정 노드 버튼 컴포넌트 생성
+            btn = Button(
+                text=btn_text, 
+                font_name='NanumGothic', 
+                size_hint_y=None, 
+                height=90, 
+                background_color=(0.15, 0.45, 0.7, 1)
+            )
+            # 클로저 공간을 활용한 클릭 이벤트 바인딩
+            btn.bind(on_release=lambda instance, nid=node_id, name=title_text: self.on_node_click(nid, name))
+            grid.add_widget(btn)
+            
+        scroll.add_widget(grid)
+        main_layout.add_widget(scroll)
+        
+        # 하단: 실시간 인터랙션 상태 창 (블랙박스 터미널 뷰어)
+        self.log_label = Label(
+            text="공정 노드를 터치하면 세부 제어 로그가 활성화됩니다.", 
+            font_name='NanumGothic', 
+            size_hint_y=0.2, 
+            halign='center', 
+            valign='middle'
+        )
+        self.log_label.bind(size=self.log_label.setter('text_size'))
+        main_layout.add_widget(self.log_label)
+        
+        return main_layout
+
+    def init_database(self):
+        """로컬 SQLite3 DB 무결성 전수검사 및 자동 테이블 생성기"""
+        try:
+            conn = sqlite3.connect('factory_data.db')
+            cursor = conn.cursor()
+            
+            # 로드맵 저장을 위한 구조적 전용 테이블 사출
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS roadmap (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stage TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    manager TEXT,
+                    status TEXT
+                )
+            ''')
+            
+            # 공정 테이블 초기 가동 여부 체크 및 초기 데이터 세트 주입
+            cursor.execute('SELECT COUNT(*) FROM roadmap')
+            if cursor.fetchone()[0] == 0:
+                new_roadmap_design = [
+                    ('1단계', '원자재 정밀 입고 및 규격 검사', '김생산', '공정 대기'),
+                    ('2단계', '메인 프레임 자동화 라인 1차 가공', '이엔지', '준비 완료'),
+                    ('3단계', '초정밀 모듈 조립 및 레이저 마킹', '박기술', '가동 중'),
+                    ('4단계', 'AI 비전 광학 장비 기반 품질 검사(QA)', '최품질', '검사 대기'),
+                    ('5단계', '완제품 진공 패킹 및 출하 물류 사출', '정물류', '대기 중')
+                ]
+                cursor.executemany(
+                    'INSERT INTO roadmap (stage, title, manager, status) VALUES (?, ?, ?, ?)', 
+                    new_roadmap_design
+                )
+                conn.commit()
+                self.log_message("새로운 5단계 공정 로드맵 데이터를 DB에 바인딩했습니다.")
+            
+            conn.close()
+            self.log_message("로컬 데이터베이스 연결 상태 검증 완료: 정상 작동 중")
+            return "연결 성공 및 무결"
+        except Exception as e:
+            error_msg = f"DB 데이터베이스 치명적 결함 발견: {str(e)}"
+            self.log_message(error_msg)
+            return "연결 실패"
+
+    def fetch_roadmap_data(self):
+        """DB에 저장된 로드맵 테이블 자원 추출"""
+        try:
+            conn = sqlite3.connect('factory_data.db')
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, stage, title, manager, status FROM roadmap ORDER BY id ASC')
+            data = cursor.fetchall()
+            conn.close()
+            return data
+        except:
+            return []
+
+    def on_node_click(self, node_id, node_name):
+        """공정 노드 인터랙션 발생 시 실시간 동작 추적기"""
+        action_log = f"인터랙션 포착 -> [공정 ID: {node_id}] {node_name}"
+        self.log_message(action_log)
+        self.log_label.text = f"최근 활성화된 공정 정보:\n{action_log}"
+
+    def log_message(self, message):
+        """앱 내부 블랙박스 무결성 로그 파일 저장 기능"""
+        with open("factory_blackbox.log", "a", encoding="utf-8") as f:
+            f.write(f"{message}\n")
 
 if __name__ == '__main__':
-    try:
-        road_map_app().run()
-    except Exception as e:
-        write_blackbox("CRITICAL_EXIT", f"어플리케이션 메인 루프 강제 종료됨: {str(e)}")
-
+    FactoryRoadMapApp().run()
