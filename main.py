@@ -2,139 +2,149 @@ import sqlite3
 import os
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.gridlayout import GridLayout
 from kivy.core.text import LabelBase
+from kivy.clock import Clock
+from datetime import datetime
 
 # 상대 경로 기준 한글 폰트 등록
 font_path = 'font.ttf'
 if os.path.exists(font_path):
     LabelBase.register(name='NanumGothic', fn_regular=font_path)
 
-class FactoryRoadMapApp(App):
+class IndoorCyclingApp(App):
     def build(self):
-        self.log_message("=== Factory 2.0 로드맵 엔진 가동 ===")
-        
-        # 1. 로컬 데이터베이스 자동 검증 및 테이블 초기화
+        # 로컬 운동 기록 데이터베이스 초기화
         db_status = self.init_database()
         
-        # 메인 레이아웃 (세로 정렬)
-        main_layout = BoxLayout(orientation='vertical', padding=15, spacing=12)
+        # 메인 레이아웃 (전체 세로 정렬)
+        main_layout = BoxLayout(orientation='vertical', padding=25, spacing=15)
         
-        # 상단 헤더 및 로컬 DB 커넥션 상태 표시줄
-        header = BoxLayout(orientation='horizontal', size_hint_y=0.1)
-        title = Label(text="⚙️ Factory 2.0 마스터 로드맵", font_name='NanumGothic', font_size=20, bold=True)
-        status_color = (0, 1, 0, 1) if "성공" in db_status else (1, 0, 0, 1)
-        status_label = Label(text=f"DB: {db_status}", font_name='NanumGothic', font_size=14, color=status_color)
+        # 상단 헤더 영역 (TV 미러링 시 상단 타이틀)
+        header = BoxLayout(orientation='horizontal', size_hint_y=0.15)
+        title = Label(text="🚴 스마트 실내 사이클링 대시보드", font_name='NanumGothic', font_size=24, bold=True)
+        status_label = Label(text=f"스토리지: {db_status}", font_name='NanumGothic', font_size=14, color=(0, 1, 0, 1))
         header.add_widget(title)
         header.add_widget(status_label)
         main_layout.add_widget(header)
         
-        # 중단: 새로 설계된 5단계 공정 스크롤 영역
-        scroll = ScrollView(size_hint_y=0.7)
-        grid = GridLayout(cols=1, spacing=15, size_hint_y=None)
-        grid.bind(minimum_height=grid.setter('height'))
+        # 중단: TV 화면 송출을 고려한 대형 운동 정보 디스플레이 그리드 (2X2 구조)
+        stats_grid = GridLayout(cols=2, spacing=20, size_hint_y=0.55)
         
-        # 데이터베이스로부터 실시간 공정 노드 호출
-        roadmap_data = self.fetch_roadmap_data()
-        for item in roadmap_data:
-            node_id, stage, title_text, manager, status = item
-            btn_text = f"[{stage}] {title_text}\n• 담당자: {manager}  |  • 상태: {status}"
-            
-            # 직관적인 대형 공정 노드 버튼 컴포넌트 생성
-            btn = Button(
-                text=btn_text, 
-                font_name='NanumGothic', 
-                size_hint_y=None, 
-                height=90, 
-                background_color=(0.15, 0.45, 0.7, 1)
-            )
-            # 클로저 공간을 활용한 클릭 이벤트 바인딩
-            btn.bind(on_release=lambda instance, nid=node_id, name=title_text: self.on_node_click(nid, name))
-            grid.add_widget(btn)
-            
-        scroll.add_widget(grid)
-        main_layout.add_widget(scroll)
+        self.lbl_speed = Label(text="0.0\nkm/h", font_name='NanumGothic', font_size=42, halign='center', color=(0.1, 0.7, 1, 1))
+        self.lbl_time = Label(text="00:00\n시간", font_name='NanumGothic', font_size=42, halign='center')
+        self.lbl_dist = Label(text="0.00\n거리 (km)", font_name='NanumGothic', font_size=42, halign='center')
+        self.lbl_cal = Label(text="0\nkcal", font_name='NanumGothic', font_size=42, halign='center', color=(1, 0.6, 0, 1))
         
-        # 하단: 실시간 인터랙션 상태 창 (블랙박스 터미널 뷰어)
-        self.log_label = Label(
-            text="공정 노드를 터치하면 세부 제어 로그가 활성화됩니다.", 
-            font_name='NanumGothic', 
-            size_hint_y=0.2, 
-            halign='center', 
-            valign='middle'
-        )
-        self.log_label.bind(size=self.log_label.setter('text_size'))
-        main_layout.add_widget(self.log_label)
+        stats_grid.add_widget(self.lbl_speed)
+        stats_grid.add_widget(self.lbl_time)
+        stats_grid.add_widget(self.lbl_dist)
+        stats_grid.add_widget(self.lbl_cal)
+        main_layout.add_widget(stats_grid)
+        
+        # 하단 제어 및 인터랙션 상태 창
+        btn_layout = BoxLayout(orientation='horizontal', spacing=20, size_hint_y=0.15)
+        btn_start = Button(text="▶ 주행 시작", font_name='NanumGothic', font_size=20, background_color=(0.15, 0.65, 0.3, 1))
+        btn_stop = Button(text="■ 주행 종료 및 기록", font_name='NanumGothic', font_size=20, background_color=(0.84, 0.24, 0.24, 1))
+        
+        btn_start.bind(on_release=self.start_workout)
+        btn_stop.bind(on_release=self.stop_workout)
+        
+        btn_layout.add_widget(btn_start)
+        btn_layout.add_widget(btn_stop)
+        main_layout.add_widget(btn_layout)
+        
+        # 최하단 안내 가이드 바
+        self.status_msg = Label(text="페달을 굴리거나 주행 시작 버튼을 누르면 기록이 시작됩니다.", font_name='NanumGothic', font_size=16, size_hint_y=0.15)
+        main_layout.add_widget(self.status_msg)
+        
+        # 내부 제어 매개변수 초기화
+        self.is_running = False
+        self.elapsed_seconds = 0
+        self.total_distance = 0.0
+        self.total_calories = 0
         
         return main_layout
 
     def init_database(self):
-        """로컬 SQLite3 DB 무결성 전수검사 및 자동 테이블 생성기"""
+        """운동 기록을 누적 저장할 로컬 SQLite3 데이터베이스 검증 및 테이블 생성"""
         try:
-            conn = sqlite3.connect('factory_data.db')
+            conn = sqlite3.connect('cycling_data.db')
             cursor = conn.cursor()
-            
-            # 로드맵 저장을 위한 구조적 전용 테이블 사출
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS roadmap (
+                CREATE TABLE IF NOT EXISTS workout_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    stage TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    manager TEXT,
-                    status TEXT
+                    date TEXT NOT NULL,
+                    duration TEXT NOT NULL,
+                    distance REAL NOT NULL,
+                    calories INTEGER NOT NULL
                 )
             ''')
-            
-            # 공정 테이블 초기 가동 여부 체크 및 초기 데이터 세트 주입
-            cursor.execute('SELECT COUNT(*) FROM roadmap')
-            if cursor.fetchone()[0] == 0:
-                new_roadmap_design = [
-                    ('1단계', '원자재 정밀 입고 및 규격 검사', '김생산', '공정 대기'),
-                    ('2단계', '메인 프레임 자동화 라인 1차 가공', '이엔지', '준비 완료'),
-                    ('3단계', '초정밀 모듈 조립 및 레이저 마킹', '박기술', '가동 중'),
-                    ('4단계', 'AI 비전 광학 장비 기반 품질 검사(QA)', '최품질', '검사 대기'),
-                    ('5단계', '완제품 진공 패킹 및 출하 물류 사출', '정물류', '대기 중')
-                ]
-                cursor.executemany(
-                    'INSERT INTO roadmap (stage, title, manager, status) VALUES (?, ?, ?, ?)', 
-                    new_roadmap_design
-                )
-                conn.commit()
-                self.log_message("새로운 5단계 공정 로드맵 데이터를 DB에 바인딩했습니다.")
-            
+            conn.commit()
             conn.close()
-            self.log_message("로컬 데이터베이스 연결 상태 검증 완료: 정상 작동 중")
-            return "연결 성공 및 무결"
+            return "정상 연결됨"
         except Exception as e:
-            error_msg = f"DB 데이터베이스 치명적 결함 발견: {str(e)}"
-            self.log_message(error_msg)
-            return "연결 실패"
+            return "DB 오류"
 
-    def fetch_roadmap_data(self):
-        """DB에 저장된 로드맵 테이블 자원 추출"""
-        try:
-            conn = sqlite3.connect('factory_data.db')
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, stage, title, manager, status FROM roadmap ORDER BY id ASC')
-            data = cursor.fetchall()
-            conn.close()
-            return data
-        except:
-            return []
+    def start_workout(self, instance):
+        """주행 시작 프로토콜 활성화"""
+        if not self.is_running:
+            self.is_running = True
+            self.status_msg.text = "주행 기록 중... TV 미러링 화면을 보면서 실내 사이클링을 즐기세요!"
+            Clock.schedule_interval(self.update_dashboard, 1)
 
-    def on_node_click(self, node_id, node_name):
-        """공정 노드 인터랙션 발생 시 실시간 동작 추적기"""
-        action_log = f"인터랙션 포착 -> [공정 ID: {node_id}] {node_name}"
-        self.log_message(action_log)
-        self.log_label.text = f"최근 활성화된 공정 정보:\n{action_log}"
+    def update_dashboard(self, dt):
+        """실시간 운동 데이터 연산 및 화면 갱신 트리거 (1초 주기 작동)"""
+        if not self.is_running:
+            return False
+            
+        self.elapsed_seconds += 1
+        # 2단계 센서 연동 전 시뮬레이션을 위한 가상 증가값 세팅
+        self.total_distance += 0.006  # 초당 대략 6미터 전진 가정
+        self.total_calories = int(self.elapsed_seconds * 0.18)  # 대략적인 소모 칼로리 연산
+        
+        minutes = self.elapsed_seconds // 60
+        seconds = self.elapsed_seconds % 60
+        
+        # UI 레이아웃 실시간 동기화
+        self.lbl_speed.text = "21.6\nkm/h"  # 가상 속도 고정
+        self.lbl_time.text = f"{minutes:02d}:{seconds:02d}\n시간"
+        self.lbl_dist.text = f"{self.total_distance:.2f}\n거리 (km)"
+        self.lbl_cal.text = f"{self.total_calories}\nkcal"
 
-    def log_message(self, message):
-        """앱 내부 블랙박스 무결성 로그 파일 저장 기능"""
-        with open("factory_blackbox.log", "a", encoding="utf-8") as f:
-            f.write(f"{message}\n")
+    def stop_workout(self, instance):
+        """주행 종료 프로토콜 실행 및 데이터베이스 무결성 적재"""
+        if self.is_running:
+            self.is_running = False
+            Clock.unschedule(self.update_dashboard)
+            
+            # 주행 데이터 처리 및 SQLite3 바인딩
+            try:
+                conn = sqlite3.connect('cycling_data.db')
+                cursor = conn.cursor()
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+                
+                minutes = self.elapsed_seconds // 60
+                seconds = self.elapsed_seconds % 60
+                duration_str = f"{minutes:02d}:{seconds:02d}"
+                
+                cursor.execute('''
+                    INSERT INTO workout_history (date, duration, distance, calories)
+                    VALUES (?, ?, ?, ?)
+                ''', (current_time, duration_str, round(self.total_distance, 2), self.total_calories))
+                conn.commit()
+                conn.close()
+                
+                self.status_msg.text = f"운동 완료! 기록이 안전하게 저장되었습니다. (총 {duration_str} / {self.total_distance:.2f}km)"
+            except Exception as e:
+                self.status_msg.text = f"데이터 저장 실패: {str(e)}"
+            
+            # 운동 리셋
+            self.elapsed_seconds = 0
+            self.total_distance = 0.0
+            self.total_calories = 0
 
 if __name__ == '__main__':
-    FactoryRoadMapApp().run()
+    IndoorCyclingApp().run()
